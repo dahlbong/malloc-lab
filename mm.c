@@ -42,12 +42,10 @@ team_t team = {
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
 
 
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
-
 //////////MACRO//////////
 #define WSIZE 4
 #define DSIZE 8
-#define CHUNKSIZE (1<<12)                               // 힙메모리 초기 가용 크기 (2**10)
+#define CHUNKSIZE (1<<12)                               // 힙메모리 초기 가용 크기 (2**12)
 
 #define MAX(x, y)           (x > y? x: y)
 #define PACK(size, alloc)   (size | alloc)              // 입력받은 주소에 allocated값을 추가하여 리턴
@@ -63,12 +61,14 @@ team_t team = {
 
 static char *heap_listp;
 static void *extended_heap(size_t);
+static void *find_fit(size_t);
+static void place(void *, size_t);
 
 
 /* 최초 가용 블록으로 힙 생성: : 패딩 블록, 프롤로그 헤더/풋터, 에필로그 헤더 추가 */
 int mm_init(void)
 {
-    if (heap_listp = mem_sbrk(4*WSIZE) == (void *)-1) return -1;
+    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) return -1;
 
     PUT(heap_listp, 0);                             // 최소정렬기준 (alignment padding block)
     PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));    // prologue header(8/1)
@@ -99,14 +99,38 @@ static void *extended_heap(size_t words) {
 /* 가용리스트에서 블록 할당 */
 void *mm_malloc(size_t size)
 {
-    int newsize = ALIGN(size + SIZE_T_SIZE);
-    void *p = mem_sbrk(newsize);
-    if (p == (void *)-1)
-	return NULL;
-    else {
-        *(size_t *)p = size;
-        return (void *)((char *)p + SIZE_T_SIZE);
+    size_t asize;
+    size_t extendsize;
+    char *bp;
+
+    if (size == 0) return NULL;
+
+    if (size <= DSIZE) asize = 2*DSIZE;
+    else asize = DSIZE * ((size + DSIZE + (DSIZE-1)) / DSIZE);
+
+    if ((bp = find_fit(asize)) != NULL) {
+        place(bp, asize);
+        return bp;
     }
+    extendsize = MAX(asize, CHUNKSIZE);
+    if ((bp = extended_heap(extendsize/WSIZE)) == NULL) return NULL;
+    place(bp, asize);
+    return bp;
+}
+
+/* asize만큼 할당하고 남은 가용 블록이 최소블록 기준보다 같거나 큰 경우에만 분할해야 한다(남은 블록이 16byte 이상) */
+static void place(void *bp, size_t asize) {
+
+
+}
+
+/* 적절한 가용 블록 찾기 (first fit)*/
+static void find_fit(siz_t asize) {
+    void *bp;
+    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) return bp;
+    }
+    return NULL;
 }
 
 /*
