@@ -63,6 +63,7 @@ static char *heap_listp;
 static void *extended_heap(size_t);
 static void *find_fit(size_t);
 static void place(void *, size_t);
+static void *coalesce(void *);
 
 
 /* 최초 가용 블록으로 힙 생성: : 패딩 블록, 프롤로그 헤더/풋터, 에필로그 헤더 추가 */
@@ -120,8 +121,19 @@ void *mm_malloc(size_t size)
 
 /* asize만큼 할당하고 남은 가용 블록이 최소블록 기준보다 같거나 큰 경우에만 분할해야 한다(남은 블록이 16byte 이상) */
 static void place(void *bp, size_t asize) {
+    size_t csize = GET_SIZE(HDRP(bp));
 
+    if ((csize - asize) >= (2*DSIZE)) {
+        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(FTRP(bp), PACK(asize, 1));
 
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize - asize, 0));
+        PUT(FTRP(bp), PACK(csize - asize, 0));
+    } else {
+        PUT(HDRP(bp), PACK(csize, 1));
+        PUT(FTRP(bp), PACK(csize, 1));
+    }
 }
 
 /* 적절한 가용 블록 찾기 (first fit)*/
@@ -133,11 +145,49 @@ static void find_fit(siz_t asize) {
     return NULL;
 }
 
-/*
- * mm_free - Freeing a block does nothing.
- */
+/* 메모리 해제 */
 void mm_free(void *ptr)
 {
+    size_t size = GET_SIZE(HDRP(ptr));
+
+    PUT(HDRP(ptr), PACK(size, 0));
+    PUT(FTRP(ptr), PACK(size, 0));
+    coalesce(ptr);
+}
+
+/* 각 케이스에 따른 연결 알고리즘 구현 */
+static void *coalesce(void *bp) 
+{
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    size_t size = GET_SIZE(HDRP(bp));
+
+    // case 1
+    if (prev_alloc && next_alloc) return bp;
+
+    // case 2
+    else if (prev_alloc && !next_alloc) {
+        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        PUT(HDRP(bp), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
+    }
+
+    // case 3
+    else if (!prev_alloc && next_alloc) {
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+
+    // case 4
+    else {
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    return bp;
 }
 
 /*
